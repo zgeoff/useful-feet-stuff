@@ -10,6 +10,7 @@ MAX_IMAGE_LEN = 128 * 1024
 PEDALS_PER_PROFILE = 4
 DEVICE_SLOTS = 8
 SETTINGS_LEN = 29
+MAX_PROFILES = 5
 
 TAG_OWNER = 0x01
 TAG_SERIAL = 0x02
@@ -30,6 +31,10 @@ PEDAL_TAGS = {TAG_SLOT_KIND, TAG_FILE, TAG_SOURCE, TAG_LABEL, TAG_DESCRIPTION}
 
 class BadImage(Exception):
     """The device's space 2 data breaks a rule this tool depends on."""
+
+
+class TooLarge(Exception):
+    """An image from the repo's config passes its size limit."""
 
 
 @dataclass
@@ -168,3 +173,55 @@ def _strip_nul(data: bytes) -> bytes:
 
 def _text(data: bytes) -> str:
     return _strip_nul(data).decode("cp1252")
+
+
+def encode(config: Config) -> bytes:
+    """Config → space 2 bytes, in the vendor app's record order (docs/image-format.md).
+
+    The vendor app leaves some record header bytes uninitialised; encode writes 0 there.
+    """
+    if not 1 <= len(config.profiles) <= MAX_PROFILES:
+        raise ValueError(f"a config holds 1 to {MAX_PROFILES} profiles, not {len(config.profiles)}")
+    records = [_rec(TAG_OWNER, 0, 0, 0, _string(config.owner)), _rec(TAG_SERIAL, 0, 0, 0, _string(config.serial))]
+    starts = []
+    for n, profile in enumerate(config.profiles, 1):
+        starts.append(sum(len(r) for r in records))
+        if len(profile.settings) != SETTINGS_LEN:
+            raise ValueError(f"profile {n} settings are {len(profile.settings)} bytes, not {SETTINGS_LEN}")
+        records.append(_rec(TAG_SETTINGS, n, 0, 0, profile.settings))
+        records.append(_rec(TAG_PROFILE_NAME, n, 0, 0, _string(profile.name)))
+        if profile.image is not None:
+            records.append(_rec(TAG_IMAGE, n, 0, 0, _string(profile.image)))
+        for slot in range(1, DEVICE_SLOTS + 1):
+            pedal = profile.pedals[slot - 1] if slot <= len(profile.pedals) else Pedal()
+            used = pedal.macro is not None
+            records.append(_rec(TAG_SLOT_KIND, n, slot, 0x08 if used else 0, bytes([0x08 if used else 0])))
+            records.append(_rec(TAG_FILE, n, slot, 0, _string(pedal.macro or "")))
+            if used:
+                records.append(_rec(TAG_LABEL, n, slot, 0, _string(pedal.label or "")))
+                if pedal.description is not None:
+                    records.append(_rec(TAG_DESCRIPTION, n, slot, 0, _string(pedal.description)))
+                records.append(_rec(TAG_SOURCE, n, slot, 0, (pedal.source or b"") + b"\0"))
+    last = len(config.profiles)
+    for tag, key in FILE_TAGS.items():
+        if key in config.files:
+            records.append(_rec(tag, last, 0, 0, _string(config.files[key])))
+    records += [_rec(r.tag, r.a, r.b, r.c, r.data) for r in config.extra]
+
+    body = b"".join(records)
+    offsets = [HEADER_LEN + s for s in starts] + [0] * (MAX_PROFILES - len(starts))
+    header = struct.pack("<IIIII5H", MAGIC, VERSION, (1 << last) - 1, len(body), len(records), *offsets)
+    image = header.ljust(HEADER_LEN, b"\0") + body
+    if len(image) > MAX_IMAGE_LEN:
+        raise TooLarge(f"space 2 image is {len(image)} bytes; the limit is {MAX_IMAGE_LEN}")
+    return image
+
+
+def _rec(tag: int, a: int, b: int, c: int, data: bytes) -> bytes:
+    if len(data) > 0xFFFF:
+        raise TooLarge(f"record {tag:#04x} holds {len(data)} bytes; the limit is 65535")
+    return struct.pack("<BBBBH", tag, a, b, c, len(data)) + data
+
+
+def _string(value: str) -> bytes:
+    return value.encode("cp1252") + b"\0"

@@ -145,3 +145,49 @@ def test_it_decodes_the_golden_image_from_the_vendor_app():
         ],
         [],
     )
+
+
+def test_it_encodes_the_golden_config_to_the_vendor_image_byte_for_byte():
+    image = (Path(__file__).parent / "test_fixtures" / "golden" / "space2.bin").read_bytes()
+
+    assert profile_image.encode(profile_image.decode(image)) == image
+
+
+def test_it_decodes_what_it_encodes():
+    config = profile_image.Config(
+        owner="Test Owner",
+        serial="F00000000",
+        files={"aliases": "Aliases.txt", "macros": "Macros.txt"},
+        profiles=[
+            profile_image.Profile("Racing Sim", bytes(range(29)), "track.png",
+                                  [profile_image.Pedal("Horn.idi", b"PROCEDURE Horn\r\nEND", "Horn", "Honk"),
+                                   profile_image.Pedal(), profile_image.Pedal(), profile_image.Pedal()]),
+            profile_image.Profile("Office", bytes(29), None,
+                                  [profile_image.Pedal(), profile_image.Pedal("Mute.idi", b"x", "Mute", None),
+                                   profile_image.Pedal(), profile_image.Pedal()]),
+        ],
+        extra=[Record(tag=0x13, a=2, b=0, c=0, data=b"\0")],
+    )
+
+    assert profile_image.decode(profile_image.encode(config)) == config
+
+
+LOCAL_PAIR = Path("/mnt/c/Users/Public/Public Hardware/GWS/pedal-restore/20261114-111836")
+
+
+@pytest.mark.skipif(not LOCAL_PAIR.is_dir(), reason="the owner's 5-profile pair is only on their PC")
+def test_it_encodes_the_5_profile_image_apart_from_the_head_bytes_the_vendor_app_leaves_unset():
+    image = (LOCAL_PAIR / "space2.bin").read_bytes()
+    image = image[: profile_image.image_length(image)]
+
+    ours = profile_image.encode(profile_image.decode(image))
+
+    unset, off = set(), profile_image.HEADER_LEN
+    while off < len(image):
+        tag, length = image[off], int.from_bytes(image[off + 4 : off + 6], "little")
+        if tag in (0x01, 0x02):
+            unset |= {off + 1, off + 2, off + 3}
+        if tag in (0x03, 0x04, 0x10):
+            unset |= {off + 2, off + 3}
+        off += 6 + length
+    assert (len(ours), [i for i in range(len(image)) if ours[i] != image[i] and i not in unset]) == (len(image), [])
