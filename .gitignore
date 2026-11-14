@@ -16,3 +16,9 @@ GWS example macros.txt
 4A*.idm
 4B*.idm
 
+
+# python and local tooling
+__pycache__/
+.venv/
+.pytest_cache/
+.worktrees/

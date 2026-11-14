@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Run the pedals CLI under Windows Python from WSL. Only Windows reaches the pedals' USB device.
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python="${PEDALS_PYTHON:-}"
+if [[ -z "$python" ]]; then
+  for candidate in /mnt/c/Users/*/AppData/Local/Programs/Python/Python31[2-9]/python.exe /mnt/c/Python31[2-9]/python.exe; do
+    [[ -x "$candidate" ]] && python="$candidate" && break
+  done
+fi
+if [[ -z "$python" ]]; then
+  echo "pedals: no Windows Python 3.12+ found; set PEDALS_PYTHON to its python.exe" >&2
+  exit 2
+fi
+
+repo_win="$(wslpath -w "$repo")"
+export PYTHONPATH="$repo_win"
+export WSLENV="${WSLENV:+$WSLENV:}PYTHONPATH"
+exec "$python" -m pedals --repo "$repo_win" "$@"
