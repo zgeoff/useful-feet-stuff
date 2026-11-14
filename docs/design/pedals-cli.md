@@ -10,8 +10,8 @@ no vendor software at runtime.
 
 The device stores its config in flash areas called spaces. Space 2 holds the profile image (names,
 labels and the macro source for each pedal); space 3 holds the runtime image (the compiled bytecode
-for every profile). Writes stay disabled until one logged save in the vendor app, the space 3
-spike, shows how the vendor app erases space 3.
+for every profile). A logged save in the vendor app, the space 3 spike, confirmed the vendor write sequence: it
+leaves space 3 erased past the new runtime, so the tool repeats that sequence unchanged.
 
 ## Shape
 
@@ -99,7 +99,7 @@ from space 2. Any other argument matches one profile name exactly, case included
 | 3 | no device: MI_01 not found, or no answer within the timeout |
 | 4 | bad repo input: `ConfigError`, `CompileError`, image over its size limit |
 | 5 | flash verify failed after an erase |
-| 6 | refused: `IDIConfig.exe` runs, old-style firmware, `apply` not yet enabled |
+| 6 | refused: `IDIConfig.exe` runs, old-style firmware |
 | 7 | bad device data: bad image header, a macro in slot 5–8, a `pull` conflict |
 
 When two codes apply, the lower one wins.
@@ -286,10 +286,7 @@ comments: // to end of line
 
 **Flash**
 
-- `flash.apply` and `flash.restore` ship disabled (exit 6). The PR that records the space 3 spike
-  result in `docs/protocol.md` enables them.
-- The write sequence is provisional until the spike confirms or amends it. Today it is the vendor
-  app's: `08`; `0d 01 02`; `05 01 00`; `05 01 01`; space 2 writes; `0d 01 03`; space 3 writes; `09`;
+- The write sequence is the vendor app's, as the spike recorded it: `08`; `0d 01 02`; `05 01 00`; `05 01 01`; space 2 writes; `0d 01 03`; space 3 writes; `09`;
   `04 01 <profile active before the write>`.
 - Before the first erase, `flash` reads spaces 2 and 3 in full into
   `C:\Users\Public\Public Hardware\GWS\pedal-restore\<timestamp>\space2.bin` and `space3.bin`.
@@ -297,7 +294,7 @@ comments: // to end of line
   HID report gets the same chunk written again, up to 3 times, as the vendor app does. After that,
   `flash` raises `VerifyFailed`, prints the backup path and the `pedals restore` command, and exits 5.
 - A config whose images pass 128 KiB (space 2) or `0xC000` bytes (space 3) fails with exit 4 before
-  any device I/O. The 128 KiB figure assumes 64 KiB sectors; the spike checks the sector size.
+  any device I/O. The two erases cover 2 sectors of 64 KiB.
 
 **Space 2 format**
 
@@ -320,8 +317,8 @@ comments: // to end of line
 - `config_files.save` writes macro files byte for byte; `.gitattributes` marks `*.idi -text`.
 - `pull` fails with exit 7 when two pedals name one macro file with different source bytes, and
   names both pedals.
-- `pull` writes only the files that pedals name. It deletes nothing; `diff` lists each `.idi` in
-  `macros/` that no pedal names.
+- `pull` writes only the files that pedals name. It deletes nothing. `diff` notes each `.idi` in
+  `macros/` that no pedal names, and the note leaves the exit code alone.
 - `diff` compares decoded `Config` objects: owner, files, each profile, each pedal (macro, source
   bytes, label, description) and `extra`. It skips serial and the zeroed header bytes. It does not
   read space 3: `apply` always rewrites both spaces together.
@@ -330,8 +327,9 @@ comments: // to end of line
 
 - CI runs the tests on Linux with `FakeHid`. The unit tests use an invented space 2 image, built from
   `Record` values in the test.
-- The golden pair in `tests/fixtures/` holds two profiles, Generic and Path of Exile, and the serial
-  `F00000000`. It comes from the vendor-app save in the space 3 spike.
+- The golden pair in `pedals/test_fixtures/golden/` holds one profile, Generic, with two macros,
+  and the serial `F00000000`. It comes from the vendor-app save in the space 3 spike. It covers
+  every statement of the supported language except `TypeText`.
 - `compiler.compile(decode(golden space 2))` equals the golden space 3 image, byte for byte.
 
 ## Decisions
@@ -353,7 +351,7 @@ comments: // to end of line
 | --- | --- | --- |
 | Read and switch | `hid`, the `device` read side, `profile_image.decode`, `config_files`; `status`, `show`, `pull`, `diff`, `switch`; `bin/pedals`; `docs/protocol.md`; space 2 in `docs/image-format.md`; a CI job for the tests | reads and `switch`, with the active profile put back after; `IDIConfig.exe` closed |
 | Repo restructure | one `pedals pull`, committed as `pedals.toml` + `macros/`; the file moves; the README rewrite; the agent skill | one `pull` |
-| Compile and write | `profile_image.encode`, `compiler`, the `device` write side, `flash`; `apply`, `restore`; `docs/language.md`; space 3 in `docs/image-format.md` | reads; after the spike, a first write of the restore dump, with the owner's go-ahead |
+| Compile and write | `profile_image.encode`, `compiler`, the `device` write side, `flash`; `apply`, `restore`; `docs/language.md`; space 3 in `docs/image-format.md` | reads; a first write of the restore dump, with the owner's go-ahead |
 
 The repo after the restructure:
 
@@ -387,13 +385,3 @@ tests/         docs/            .claude/skills/pedals/SKILL.md
   need a resident Windows process.
 - Old-style firmware, which uses fixed flash addresses.
 - The vendor app's macro builder and alias files.
-
-## Open questions
-
-- **What erases space 3, and how big is a sector?** The vendor sequence has one erase pair, sent
-  after `0d 01 02`, yet space 3 reads back as erased `0xFF` past the runtime. The space 3 spike
-  settles it before the compile-and-write PR: the owner saves once in `IDIConfig.exe` while a logger
-  records the packets and the device's `a1` debug text. The owner first cuts the device down to the
-  Generic and Path of Exile profiles, which stay on the device as the profiles the repo manages; the
-  save then also produces the golden pair.
-  Until then, `apply` and `restore` stay disabled and the golden tests skip.

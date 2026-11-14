@@ -1,77 +1,49 @@
-# useful feet stuff
+<div align="center">
+  <h1>useful feet stuff</h1>
 
-**tl;dr:** some _very_ basic macros, templates, and other required config for my
-[USB foot pedal setup](https://www.gamingmouse.com/gaming/fragpedal/quad/) &
-software.
+  <p>
+    <a href="./docs/README.md">Documentation</a> •
+    <a href="./docs/protocol.md">Pedal USB protocol</a>
+  </p>
+</div>
 
-## what??
+Config, macros and a CLI for a GWS Fragpedal Quad.
 
-_foot pedals_. buttons for your feet. pretty wild stuff.
+The pedals hold up to 5 profiles and run one at a time. Each profile gives each of the 4 pedals a macro: a plain-text `.idi` program that sends keys or mouse clicks. This repo holds the whole config as text. `pedals.toml` lists the profiles and the macro each pedal runs, and `macros/` holds the macros.
 
-in most cases i configure them as simple generic bindings, where each pedal is
-bound to a different function key (F7 -> F10). each key is just bound to context
-context specific actions ex. push-to-talk for comms, holding breath and toggling
-sights in Tarkov, etc. i have some more specific setups for things like
-[flask pianoing](./FlaskPiano.idi) in Path of Exile, and
-[spamming left click](./RepeatLeftClick.idi) when it's called for.
+The `pedals` CLI reads the config from the pedals over USB, shows it, and compares it with the repo. It also switches the active profile, and never changes the profiles themselves. To change the config, edit it in the vendor app, `IDIConfig.exe`, and save it to the pedals. Then run `bin/pedals pull` to copy the pedals' config into the repo.
 
-they're useful things. highly recommend.
+## Quick start
 
-## usage
+Install Python 3.12 or later on Windows. The CLI needs no packages. Run it from WSL through `bin/pedals`, which finds that Windows Python, because only Windows reaches the pedals' USB device. Close `IDIConfig.exe` first. The CLI refuses to run beside it, because both programs read the same USB channel.
 
-1. install the GWS IDI software
-2. `git clone git@github.com:meatwallace/useful-feet-stuff.git somewhere/`
-3. `mv somewhere/{*,.*} C:\Users\Public\Public Hardware\GWS\IDI Device\macro/`
-
-## scripting notes
-
-### pressing & releasing keys via `KeyActionHid`
-
-`KeyActionHid` is used for basic key press lifecycle management. it's function
-signature looks like:
-
-```
-// pseudo-code
-KeyActionHid(modifier: ModifierHexcodeMask, key: KeyHexcode, action: Action)
+```bash
+bin/pedals status   # firmware, channel and active profile
+bin/pedals show     # every profile and its pedals
+bin/pedals diff     # this repo against the pedals
 ```
 
-- key codes are mapped to a hexcode ID specific to USB 1.11 from what i can tell
-- they can be found at
-  [this helpful gist](https://gist.github.com/MightyPork/6da26e382a7ad91b5496ee55fdc73db2).
-  a copy of the above gist is inlined in the repo
-  [here](./reference/usb_hid_keys.h) for posterity.
+After the PC reboots, `status` can print `channel    no answer`. Replug the pedals' USB cable. Then run `status` again.
 
-#### `ModifierMaskHexcode`
+## Checks
 
-the `modifier` arg maps to the above hexcodes reference specifically for
-modifier masks.
+Run the tests in WSL with [uv](https://docs.astral.sh/uv/). They use a fake device, so the pedals can stay unplugged.
 
-NOTE: it may not be limited to the subset listed below, however these are the
-only ones creatable via the macro builder UI. diverging from these (ex. using
-right side modifier keys) is entirely untested.
-
-- `0x00` -> NONE
-- `0x01` -> CTRL
-- `0x02` -> SHIFT
-- `0x04` -> ALT
-- `0x08` -> META (or "GUI" in GWS IDI UI)
-
-#### `KeyHexcode`
-
-the `key` arg should be resolved using the above hexcode reference.
-
-#### `Action`
-
-the `action` arg includes values to create a `press -> release` lifecycle as
-well as another code for the entire lifecycle in one action:
-
-- `0` -> press
-- `1` -> release
-- `30` -> complete key press
-
-#### example usage:
-
+```bash
+uv run pytest
 ```
-//  (ALT, F4, press)
-KeyActionHid(0x04,0x42,1)
-```
+
+CI runs the same command.
+
+## Layout
+
+- `pedals.toml`: the profiles, and which macro each pedal runs.
+- `macros/`: every macro, used or not; `macros/templates/` holds starting points.
+- `pedals/`: the CLI, with its tests beside each module.
+- `bin/pedals`: runs the CLI under Windows Python from WSL.
+- `reference/`: the USB HID key codes and the vendor app's macro list.
+- `docs/`: the protocol, the flash image format and the CLI design.
+
+## Documentation
+
+See [docs/](./docs/README.md).

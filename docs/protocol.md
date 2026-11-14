@@ -30,8 +30,8 @@ The table lists the commands in the order a config session uses them.
 | `0d 01 <space>` | select a flash space | `8d` |
 | `02 06 <len:u16> <addr:u32>` | read `len` bytes, 62 at most, from the selected space | `82 <n> <data[n]>` |
 | `04 01 <profile>` | switch the active profile | `84` |
-| `08` | stop the runtime, the device's macro interpreter | none |
-| `05 01 <sector>` | erase sector number `<sector>` of the selected space; the sector size is not known | `85` |
+| `08` | stop the runtime, the device's macro interpreter | `88` |
+| `05 01 <sector>` | erase 64 KiB sector number `<sector>`; the device logs `kBHEraseFlashSector <sector × 0x10000>` | `85` |
 | `03 <len+6> <len:u16> <addr:u32> <data>` | write `len` bytes, 56 at most, never across a 256-byte boundary | `83` |
 | `09` | start the runtime | `89` |
 
@@ -75,7 +75,7 @@ The vendor app reads the profile image at startup, and the CLI reads it in the s
 
 The vendor app saves a config with this sequence. Each write in steps 5 and 7 is followed by a read of the same bytes, and the vendor app compares the two before the next write.
 
-1. Send `08` to stop the runtime.
+1. Send `08` to stop the runtime. Expect: `88`.
 2. Send `0d 01 02`. Expect: `8d`.
 3. Send `05 01 00`. Expect: `85`.
 4. Send `05 01 01`. Expect: `85`.
@@ -85,7 +85,7 @@ The vendor app saves a config with this sequence. Each write in steps 5 and 7 is
 8. Send `09` to start the runtime. Expect: `89`.
 9. Send `04 01 <profile>` with the profile that was active before step 1. Expect: `84`.
 
-Space 3 reads back as erased (`0xFF`) past the runtime image, yet the sequence erases nothing after it selects space 3. Which command erases space 3 is not known.
+The sequence erases nothing after it selects space 3, yet after a save space 3 reads back as erased (`0xFF`) past the new runtime image, where the old, longer image was. Which of the two erases clears space 3 is not known: space 2 reads as erased at `0x10000`, so sector 1 is not simply the start of space 3. Repeat the whole sequence to get the same result.
 
 ## The silent channel after a reboot
 

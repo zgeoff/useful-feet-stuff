@@ -1,0 +1,16 @@
+PROCEDURE ButtonDownRepeat
+	MButton(1,0,90,0)
+RETURN
+END
+
+THREAD Profile
+	Start:
+		WaitForButton(Button, ButtonMask)
+
+		DO
+			ButtonDownRepeat()
+			DelayForMs(16)	
+		WHILE ((GetButtonState & ButtonMask) == Button)
+
+		GOTO Start
+END
