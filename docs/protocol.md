@@ -16,7 +16,7 @@ The device answers each command with the command byte plus `0x80`, such as `82` 
 
 The device also sends reports that answer no command. A program that waits for an answer skips them:
 
-- `a1 <len> <text>`: debug text, such as `kBHSetFlashSpace 2` after a `0d` command.
+- `a1 <len> <text>`: debug text, such as `kBHSetFlashSpace 2` after a `0d` command. The firmware also sends `<count> SW <pedal>` when a pedal goes down, and `<count> SW` when it comes back up. When a press brings no `SW` text, the firmware never saw it, and the fault is in the pedal, its cable or its socket.
 - `a0` and `a2` to `a7`: requests for the vendor app to play a sound or show text on screen.
 
 ## Commands
