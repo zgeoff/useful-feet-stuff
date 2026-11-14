@@ -1,0 +1,13 @@
+[project]
+name = "pedals"
+version = "0.1.0"
+description = "Read, compare and switch the profiles on a GWS Fragpedal Quad."
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
+[tool.pytest.ini_options]
+testpaths = ["pedals"]
+python_files = ["test_*.py"]
