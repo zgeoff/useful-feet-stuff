@@ -23,6 +23,7 @@ class FakeDevice:
     lost_writes: int = 0  # number of writes that never reach the flash, to test the retry
     sent: list[bytes] = field(default_factory=list)
     running: bool = True
+    _just_started: bool = False
     _queue: list[bytes] = field(default_factory=list)
     _space: int | None = None
     _flash: dict[int, bytearray] = field(default_factory=dict)
@@ -70,12 +71,17 @@ class FakeDevice:
             return bytes([0x82, len(data)]) + data
         if cmd == 0x04:
             self.active = payload[2]
+            if self._just_started:
+                # Firmware 1.0.8 sends only debug text for the first switch after 09, never 84.
+                self._just_started = False
+                return bytes([0xA1, 0x12]) + b"kBHChangeProfile " + bytes([0x30 + payload[2]])
             return bytes([0x84, 0x00])
         if cmd == 0x08:
             self.running = False
             return bytes([0x88, 0x00])
         if cmd == 0x09:
             self.running = True
+            self._just_started = True
             return bytes([0x89, 0x00])
         if cmd == 0x05:
             self._check_write_allowed()

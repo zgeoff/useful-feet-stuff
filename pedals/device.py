@@ -57,6 +57,12 @@ class Device:
     def start_runtime(self) -> None:
         self._ask(b"\x09", {0x89})
 
+    def switch_profile_after_start(self, n: int) -> None:
+        """Switch profile right after 09. Firmware 1.0.8 never answers this switch, so check it with 0b."""
+        self._hid.send(bytes([0x04, 0x01, n]))
+        if (active := self.active_profile()) != n:
+            raise WriteFailed(f"the pedals run profile {active} after a switch to {n}")
+
     def erase_config_sectors(self) -> None:
         """Erase what the vendor app erases before a save: sectors 0 and 1, with space 2 selected."""
         self._select(2)

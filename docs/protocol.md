@@ -84,9 +84,11 @@ The CLI's `apply` and `restore` commands write a new profile image and a new run
 7. Send `0d 01 02`, and write the new profile image from address 0. Expect: `83 01 00` for each write.
 8. Send `0d 01 03`, and write the new runtime image from address 0. Expect: `83 01 00` for each write.
 9. Send `09` to start the runtime. Expect: `89`.
-10. Send `04 01 <profile>`. Expect: `84`. `apply` sends the profile that was active before step 2, and `restore` sends profile 1.
+10. Send `04 01 <profile>`, then send `0b`. Expect: `8b 01 <profile>`. `apply` sends the profile that was active before step 2, and `restore` sends profile 1.
 
 In steps 7 and 8, each page of 256 bytes takes 4 writes of 56 bytes and 1 of 32. Like the vendor app, the CLI reads back each write. When the bytes differ, it writes them again, for at most 3 writes in all.
+
+The first `04` after `09` gets no `84`: the pedals send only the debug text `kBHChangeProfile <profile>`. The vendor app sends `04` there and ignores the missing answer, so the CLI checks the switch with `0b`.
 
 Which erase clears space 3 is not known, but after steps 4 and 5, space 3 reads as `0xFF`.
 
@@ -96,6 +98,7 @@ Each failure exits 5, and the CLI prints the `pedals restore` command for the ba
 
 - **Step 6 finds space 2 not blank:** the CLI writes nothing, and the runtime stays stopped.
 - **Step 6 finds space 3 not blank:** the old runtime image is still in space 3. The CLI writes the old profile image back to space 2, so the two images match again, and sends `09`. The pedals run the old config.
+- **Step 10 fails:** the pedals run the new config, on whichever profile they show.
 - **A write reads back wrong 3 times, answers a status other than 0, or gets no answer:** the CLI stops. The runtime stays stopped, so the pedals send no keys until a restore or another `apply` succeeds.
 
 ## The silent channel after a reboot

@@ -94,7 +94,11 @@ def _write(dev: Device, space2: bytes, space3: bytes, old: tuple[bytes, bytes], 
     _write_space(dev, 2, space2, backup_dir)
     _write_space(dev, 3, space3, backup_dir)
     dev.start_runtime()
-    dev.switch_profile(profile_after)
+    try:
+        dev.switch_profile_after_start(profile_after)
+    except (NoAnswer, WriteFailed) as err:
+        raise FlashError(f"the pedals run the new config, but the profile switch failed: {err}",
+                         backup_dir, True) from err
 
 
 def _write_space(dev: Device, space: int, image: bytes, backup_dir: Path | None) -> None:

@@ -431,3 +431,25 @@ def test_compiler_binds_equality_tighter_than_and_as_the_vendor_table_does():
     code = code_of(compiler.compile(config_of([b"THREAD Check\nDelayForMs(1 & 2 == 0)\nEND\n"])))
 
     assert code.hex() == "8182800b12420f00"
+
+
+class SilentAfterStart(FakeDevice):
+    def _answer(self, payload):
+        if payload[0] == 0x0B and self.running and self._just_started is False and self.erased_once:
+            return None
+        if payload[0] == 0x05:
+            self.erased_once = True
+        return super()._answer(payload)
+
+    erased_once = False
+
+
+def test_apply_says_the_macros_run_when_only_the_profile_check_after_the_write_fails(tmp_path):
+    fake = SilentAfterStart(spaces={2: (GOLDEN / "space2.bin").read_bytes(), 3: (GOLDEN / "space3.bin").read_bytes()})
+    ctx = setup_test(tmp_path, fake)
+    ctx["run"]("pull")
+    relabel_pedal_1(ctx, "Talk")
+
+    code, out = ctx["run"]("apply", "--yes")
+
+    assert (code, fake.stored(2, 4) == bytes.fromhex("32427586"), "macros are stopped" in out) == (5, True, False)
