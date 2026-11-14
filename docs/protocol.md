@@ -1,6 +1,6 @@
 # Pedal USB protocol
 
-The `pedals` CLI configures the Fragpedal Quad, a set of 4 USB foot pedals made by GWS, with the messages below. GWS ships a Windows config app, `IDIConfig.exe`, called the vendor app here. The facts come from the vendor app's disassembly, and from its traffic, which a script read out of its memory while it ran against pedals with firmware `Sep 26 2020 14:06:10 Ver 1.0.8`.
+The `pedals` CLI configures the Fragpedal Quad, a set of 4 USB foot pedals made by GWS, with the messages below. GWS ships a Windows config app, `IDIConfig.exe`, called the vendor app here. The facts come from a disassembly of the vendor app. They also come from its traffic with pedals on firmware `Sep 26 2020 14:06:10 Ver 1.0.8`, which a script read out of the vendor app's memory.
 
 ## Messages
 
@@ -21,11 +21,11 @@ The device also sends reports that answer no command. A program that waits for a
 
 ## Commands
 
-The table lists the commands in the order a config session uses them.
+The table lists the commands in the order the vendor app first sends them.
 
 | Send | Meaning | Answer |
 | --- | --- | --- |
-| `01` | get version | `91 <x> <flags:u32> <text>`: byte 1 is not a length here; the version text runs from byte 6 to a NUL |
+| `01` | get version | `91 <unknown> <flags:u32> <text>`: byte 1 is not a length here; the version text runs from byte 6 to a NUL |
 | `0b` | get active profile | `8b 01 <profile>`; profile numbers start at 1 |
 | `0d 01 <space>` | select a flash space | `8d` |
 | `02 06 <len:u16> <addr:u32>` | read `len` bytes, 62 at most, from the selected space | `82 <n> <data[n]>` |
@@ -35,7 +35,7 @@ The table lists the commands in the order a config session uses them.
 | `03 <len+6> <len:u16> <addr:u32> <data>` | write `len` bytes, 56 at most, never across a 256-byte boundary | `83 01 <status>`; status 0 is ok |
 | `09` | start the runtime | `89` |
 
-`status`, `show`, `pull`, `diff` and `switch` send only `01`, `0b`, `0d`, `02` and `04`. Only `apply` and `restore` send `08`, `05`, `03` and `09`, as [Writing the flash](#writing-the-flash) says. No command selects space 0 or `0x81`, which hold the firmware.
+The CLI's `status`, `show`, `pull`, `diff` and `switch` commands send only `01`, `0b`, `0d`, `02` and `04`. Only its `apply` and `restore` commands send `08`, `05`, `03` and `09`, as [Writing the flash](#writing-the-flash) says. The CLI never selects space 0 or `0x81`, which hold the firmware.
 
 ## Firmware styles
 
@@ -67,32 +67,37 @@ The vendor app reads the profile image at startup, and the CLI reads it in the s
 1. Send `01`. Expect: `91`.
 2. Send `0b`. Expect: `8b` with the active profile.
 3. Send `0d 01 02`. Expect: `8d`.
-4. Read 62 bytes, then 22 bytes, from address 0. Expect: `82` for each. Together they are the 84-byte header.
-5. Take the record-area length, a u32 at header offset `0x0C`.
+4. Read 62 bytes from address 0, then 22 bytes from address 62. Expect: `82` for each. Together they are the 84-byte header.
+5. Take the length of the records, a u32 at header offset `0x0C`, as [image-format.md](image-format.md#header) gives it.
 6. From address 84, read that many bytes, 62 or fewer at a time. Expect: `82` for each.
 
 ## Writing the flash
 
-`pedals apply` and `pedals restore` write with the vendor app's sequence. They add the blank check in step 5 and the read-back in steps 6 and 8, which the vendor app does in part.
+The CLI's `apply` and `restore` commands write with the vendor app's sequence. The vendor app reads back each write. The CLI also checks, in step 6, that the erase left both spaces blank.
 
-1. Send `08` to stop the runtime. Expect: `88`.
-2. Send `0d 01 02`. Expect: `8d`.
-3. Send `05 01 00`. Expect: `85`, after about 0.7 s.
-4. Send `05 01 01`. Expect: `85`.
-5. Read space 2 and space 3 over the old and the new image length. Expect: `0xFF` in every byte.
-6. Write the profile image to space 2, from address 0. Expect: `83 01 00` for each write.
-7. Send `0d 01 03`. Expect: `8d`.
-8. Write the runtime image to space 3, from address 0. Expect: `83 01 00` for each write.
+1. Read space 2 and space 3, and save both images to a backup folder.
+2. Send `08` to stop the runtime. Expect: `88`.
+3. Send `0d 01 02`. Expect: `8d`.
+4. Send `05 01 00`. Expect: `85`, after about 0.7 s.
+5. Send `05 01 01`. Expect: `85`.
+6. Read space 2, then select and read space 3, each up to the longer of its old and new image. Expect: `0xFF` in every byte.
+7. Send `0d 01 02`, and write the profile image to space 2 from address 0. Expect: `83 01 00` for each write.
+8. Send `0d 01 03`, and write the runtime image to space 3 from address 0. Expect: `83 01 00` for each write.
 9. Send `09` to start the runtime. Expect: `89`.
-10. Send `04 01 <profile>` with the profile that was active before step 1. Expect: `84`.
+10. Send `04 01 <profile>` with the profile that was active before step 2. Expect: `84`.
 
-Each write is at most 56 bytes and never crosses a 256-byte page, so each page takes 4 writes of 56 bytes and 1 of 32. After each write, the CLI reads the same bytes back. When they differ, it writes the chunk again, up to 3 times. After the third failure, it stops with the runtime stopped, and prints the `pedals restore` command for the backup it took before step 1.
+Each write is at most 56 bytes and never crosses a 256-byte page, so each page takes 4 writes of 56 bytes and 1 of 32. After each write, the CLI reads the same bytes back. When they differ, it writes the chunk again, for at most 3 writes in all. After the third, it stops and prints the `pedals restore` command for the backup from step 1. The runtime stays stopped, so the pedals send no keys until a restore or another `apply` succeeds.
 
-The firmware logs each erase as `kBHEraseFlashSector <sector × 0x10000>`. The sequence erases nothing after it selects space 3, yet after the two erases, space 3 reads as `0xFF`. Which erase clears it is not known: space 2 reads as `0xFF` at `0x10000` too, so sector 1 is not simply the start of space 3. When step 5 finds space 3 not blank, the CLI writes the old profile image back to space 2, starts the runtime beside the old runtime image, and stops.
+The firmware logs each erase as `kBHEraseFlashSector <sector × 0x10000>`. The sequence erases nothing after it selects space 3, yet after the two erases, space 3 reads as `0xFF`. Which erase clears space 3 is not known.
+
+When step 6 finds a byte that is not `0xFF`, the CLI stops:
+
+- In space 2, it writes nothing more, and prints the `pedals restore` command.
+- In space 3, the old runtime image is still there. The CLI writes the old profile image from step 1 back to space 2, so the two images match again. It then sends `09` and exits 5.
 
 ## The silent channel after a reboot
 
-After a PC reboot, the config channel can accept messages and never answer, for the vendor app and the CLI alike. The pedals still work as pedals. Replug the USB cable, and the channel answers again.
+After a PC reboot, the config channel can accept messages and never answer, for the vendor app and the CLI alike. The CLI then waits 2 seconds, prints `channel    no answer`, and exits 3. The pedals still work as pedals. Replug the USB cable, and the channel answers again.
 
 ## Running the CLI beside the vendor app
 

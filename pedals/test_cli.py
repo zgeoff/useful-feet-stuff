@@ -1,5 +1,7 @@
 import io
 from pathlib import Path
+
+import pytest
 from datetime import datetime
 
 from pedals import profile_image
@@ -319,7 +321,7 @@ def test_apply_stops_with_the_restore_command_after_3_failed_writes(tmp_path):
         [
             "flash      space 2 at 0x0 reads back wrong after 3 writes",
             "flash      the pedals' macros are stopped until a write succeeds",
-            f'flash      to put the old config back, run: pedals restore "{backup}"',
+            f'flash      to put the old config back, run: bin/pedals restore "{backup}"',
         ],
         False,
     )
@@ -379,3 +381,53 @@ def test_apply_writes_in_the_vendor_chunks_of_56_bytes_inside_each_page(tmp_path
 
     writes = [(int.from_bytes(p[4:8], "little"), int.from_bytes(p[2:4], "little")) for p in ctx["fake"].sent if p[0] == 0x03]
     assert writes[:6] == [(0x00, 56), (0x38, 56), (0x70, 56), (0xA8, 56), (0xE0, 32), (0x100, 56)]
+
+
+def test_restore_refuses_a_backup_shorter_than_its_header_says(tmp_path):
+    ctx = setup_test(tmp_path, golden_device())
+    (ctx["backups"] / "cut").mkdir(parents=True)
+    (ctx["backups"] / "cut" / "space2.bin").write_bytes((GOLDEN / "space2.bin").read_bytes())
+    (ctx["backups"] / "cut" / "space3.bin").write_bytes((GOLDEN / "space3.bin").read_bytes()[:72])
+
+    code, out = ctx["run"]("restore", str(ctx["backups"] / "cut"), "--yes")
+
+    assert (code, "space 3 image claims 332 bytes; the file holds 72" in out, [p for p in ctx["fake"].sent if p[0] == 0x08]) == (
+        7,
+        True,
+        [],
+    )
+
+
+class FailingWrites(FakeDevice):
+    def __init__(self, failure: str, **kwargs):
+        super().__init__(**kwargs)
+        self.failure = failure
+
+    def _answer(self, payload):
+        if payload[0] == 0x03 and self.failure == "timeout":
+            return None
+        if payload[0] == 0x03 and self.failure == "status":
+            return bytes([0x83, 0x01, 0x01])
+        return super()._answer(payload)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "status"])
+def test_apply_prints_the_restore_command_when_a_write_gets_no_good_answer(tmp_path, failure):
+    fake = FailingWrites(failure, spaces={2: (GOLDEN / "space2.bin").read_bytes(), 3: (GOLDEN / "space3.bin").read_bytes()})
+    ctx = setup_test(tmp_path, fake)
+    ctx["run"]("pull")
+    relabel_pedal_1(ctx, "Talk")
+
+    code, out = ctx["run"]("apply", "--yes")
+
+    backup = ctx["backups"] / "20260301-093000"
+    assert (code, out.splitlines()[-1]) == (5, f'flash      to put the old config back, run: bin/pedals restore "{backup}"')
+
+
+def test_compiler_binds_equality_tighter_than_and_as_the_vendor_table_does():
+    from pedals import compiler
+    from pedals.test_compiler import code_of, config_of
+
+    code = code_of(compiler.compile(config_of([b"THREAD Check\nDelayForMs(1 & 2 == 0)\nEND\n"])))
+
+    assert code.hex() == "8182800b12420f00"

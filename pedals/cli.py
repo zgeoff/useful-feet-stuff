@@ -69,7 +69,7 @@ def main(argv: list[str], env: Env) -> int:
         if not getattr(err, "runtime_running", False):
             _say(env, "flash      the pedals' macros are stopped until a write succeeds")
         if backup_dir is not None:
-            _say(env, f"flash      to put the old config back, run: pedals restore \"{backup_dir}\"")
+            _say(env, f"flash      to put the old config back, run: bin/pedals restore \"{backup_dir}\"")
         return EXIT_FLASH
     except (BadImage, PullRefused) as err:
         _say(env, f"device     {err}")

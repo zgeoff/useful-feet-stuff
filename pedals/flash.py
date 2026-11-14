@@ -10,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 from pedals import compiler, profile_image
-from pedals.device import PAGE, WRITE_CHUNK, Device
+from pedals.device import PAGE, WRITE_CHUNK, Device, WriteFailed
+from pedals.hid import NoAnswer
 
 RETRIES = 3
 SPACE2_FILE = "space2.bin"
@@ -47,8 +48,12 @@ def load_pair(folder: Path) -> tuple[bytes, bytes]:
     """The space 2 and space 3 images in a backup folder, each cut to the length its header gives."""
     space2 = (folder / SPACE2_FILE).read_bytes()
     space3 = (folder / SPACE3_FILE).read_bytes()
-    space2 = space2[: profile_image.image_length(space2)]
-    return space2, space3[: runtime_length(space3)]
+    length2, length3 = profile_image.image_length(space2), runtime_length(space3)
+    if len(space2) < length2:
+        raise profile_image.BadImage(f"space 2 image claims {length2} bytes; the file holds {len(space2)}")
+    if len(space3) < length3:
+        raise profile_image.BadImage(f"space 3 image claims {length3} bytes; the file holds {len(space3)}")
+    return space2[:length2], space3[:length3]
 
 
 def runtime_length(space3: bytes) -> int:
@@ -63,6 +68,15 @@ def runtime_length(space3: bytes) -> int:
 def write(dev: Device, space2: bytes, space3: bytes, old: tuple[bytes, bytes], backup_dir: Path | None,
           profile_after: int) -> None:
     """Write both images. `old` is the pair on the device now, written back if the erase misses space 3."""
+    try:
+        _write(dev, space2, space3, old, backup_dir, profile_after)
+    except (NoAnswer, WriteFailed) as err:
+        # Once the runtime stops, any lost answer can leave the flash half written.
+        raise FlashError(f"the write stopped: {err}", backup_dir, False) from err
+
+
+def _write(dev: Device, space2: bytes, space3: bytes, old: tuple[bytes, bytes], backup_dir: Path | None,
+           profile_after: int) -> None:
     dev.stop_runtime()
     dev.erase_config_sectors()
 
