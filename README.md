@@ -15,7 +15,7 @@ The `pedals` CLI reads the config from the pedals over USB, shows it, compares i
 
 ## Quick start
 
-Install Python 3.12 or later on Windows. The CLI needs no packages. Run it from WSL through `bin/pedals`, which finds that Windows Python, because only Windows reaches the pedals' USB device. Close the vendor app, `IDIConfig.exe`, first. The CLI refuses to run beside it, because both programs read the same USB channel.
+Install Python 3.12 or later on Windows. The CLI needs no packages. Run it from WSL through `bin/pedals`, which finds that Windows Python. Only Windows reaches the pedals' USB device. Close the vendor app, `IDIConfig.exe`, first: both programs read the same USB channel, so the CLI refuses to run beside it.
 
 ```bash
 bin/pedals status   # firmware, channel and active profile

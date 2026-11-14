@@ -1,6 +1,8 @@
 # Macro language
 
-Each pedal runs a macro: a `.idi` text file in `macros/`, written in IDI, the macro language of the pedals' vendor app, `IDIConfig.exe`. `pedals.toml` names the macro each pedal runs. `pedals apply` compiles every macro into one runtime image for the pedals, with the same bytes the vendor app's compiler writes. When a macro uses anything outside the subset below, `pedals apply` stops with a compile error, and prints the macro file and the line.
+The pedals hold up to 5 profiles and run one at a time. A profile gives each of the 4 pedals a macro: a `.idi` text file in `macros/`, written in IDI, the macro language of the vendor app, `IDIConfig.exe`. [cli.md](cli.md#pedalstoml) shows how `pedals.toml` lists the profiles and the macro each pedal runs. `pedals switch` changes the active profile.
+
+`pedals apply` compiles every macro into one runtime image, with the same bytes as the vendor app's compiler. When a macro uses anything outside the subset below, `pedals apply` stops with a compile error, and prints the macro file and the line.
 
 ## The subset
 
@@ -13,24 +15,26 @@ DO … WHILE (<expression>)          a loop that runs again while the expression
 // …                               a comment to the end of the line
 ```
 
-A macro file holds its procedures and one thread. A profile is one set of 4 pedal macros, and the pedals run one profile at a time.
+A macro file holds its procedures and one thread.
 
-An expression holds decimal and `0x` hex literals, a string in double quotes, `Button`, `ButtonMask`, `GetButtonState`, parentheses, `&` and `==`. `==` binds tighter than `&`, as in C and in the vendor app's operator table, so put parentheses around a `&` you compare. An expression goes in a `WHILE` or in a builtin's arguments.
+An expression holds decimal and `0x` hex literals, a string in double quotes, `Button`, `ButtonMask`, `GetButtonState`, parentheses, `&` and `==`. `==` binds tighter than `&`, as in C and in the vendor app's operator table. Put parentheses around a `&` you compare. An expression goes in a `WHILE` or in a builtin's arguments.
 
 | Builtin | Arguments | Does |
 | --- | --- | --- |
-| `WaitForButton(button, mask)` | 2 | waits for the pedal press that `button` and `mask` select; the macros pass `Button, ButtonMask` |
+| `WaitForButton(button, mask)` | 2 | waits for a pedal press; pass `Button, ButtonMask` to wait for this macro's pedal |
 | `DelayForMs(ms)` | 1 | waits `ms` milliseconds |
 | `KeyActionHid(modifier, key, action)` | 3 | presses (`action` 1) or releases (`action` 0) a USB HID key |
-| `MButton(a, b, c, d)` | 4 | sends a mouse button action; the vendor app defines the 4 values, so copy a call from a macro that works, such as `MButton(1,0,90,0)` |
+| `MButton(a, b, c, d)` | 4 | sends a mouse action |
 | `TypeText("text", ms)` | 2 | types the text, with `ms` milliseconds between keys |
-| `GetButtonState` | 0 | the current bit of each pedal that is down; write it with no parentheses |
+| `GetButtonState` | 0 | a bit mask of the pedals that are down |
 
-`Button` and `ButtonMask` both hold the bit of the pedal that runs the macro: 1 for pedal 1, 2 for pedal 2, 4 for pedal 3 and 8 for pedal 4. The compiler writes the bit in as a constant, so one macro file works on any pedal. Take key codes and modifier bits from [reference/usb_hid_keys.h](../reference/usb_hid_keys.h). For two modifiers, add their bits.
+Write `GetButtonState` with no parentheses. `macros/RepeatLeftClick.idi` and `macros/SpamClick.idi` call `MButton(1,0,90,0)` to send a left click. The vendor app defines the meaning of each value, and this repo records no other call.
+
+`Button` and `ButtonMask` both hold the bit of the pedal that runs the macro: 1 for pedal 1, 2 for pedal 2, 4 for pedal 3 and 8 for pedal 4. `pedals apply` writes the bit in as a constant, so one macro file works on any pedal. Take key codes and modifier bits from [reference/usb_hid_keys.h](../reference/usb_hid_keys.h). For two modifiers, add their bits.
 
 ## Bytecode
 
-The opcodes below come from the vendor app's keyword table and its own disassembler. `pedals apply` writes the same bytes. Every byte value is hex, and every operand is little-endian.
+The opcodes come from the vendor app's keyword table and its own disassembler. Every byte value below is hex, and every operand is little-endian.
 
 | Bytes | Instruction |
 | --- | --- |
@@ -38,25 +42,29 @@ The opcodes below come from the vendor app's keyword table and its own disassemb
 | `01` | RETURN |
 | `0b` | `==` on the top two values of the stack |
 | `12` | `&` on the top two values of the stack |
-| `80` + n | push n, for n from 0 to 127 |
-| `44` + operand | push any other value |
-| `42` + id | call the builtin with that id |
-| `43` + n | call procedure n − 1, numbered from 0 across all macros on the pedals |
-| `46` + offset | branch back to the `DO` when the top of the stack is true |
-| `65` + 2-byte offset | `GOTO`; the vendor app always writes it as `45` in its 2-byte form |
+| one byte, `80` to `ff` | push the byte minus `80`: 0 to 127 |
+| `44`, then an operand | push any other value |
+| `42`, then an id | call the builtin with that id |
+| `43`, then the procedure's number plus 1 | call a procedure |
+| `46`, then an offset | branch back to the `DO` when the top of the stack is true |
+| `45`, then an offset | `GOTO` |
 
-Each opcode from `40` to `4f` takes a signed operand in the narrowest width that holds it, and the opcode carries the width:
+### Operand widths
 
-| Opcode | Operand |
+Each opcode from `40` to `4f` takes a signed operand. The compiler picks the narrowest width that holds the value, and adds a width flag to the opcode:
+
+| Opcode byte | Operand |
 | --- | --- |
-| op | 1 byte |
-| op + `20` | 2 bytes |
-| op + `10` | 3 bytes |
-| op + `30` | 4 bytes |
+| the opcode | 1 byte |
+| the opcode plus `20` | 2 bytes |
+| the opcode plus `10` | 3 bytes |
+| the opcode plus `30` | 4 bytes |
 
-A branch offset counts from the byte after the instruction.
+`GOTO` breaks that rule. The vendor app always writes it with a 2-byte offset, as `65`. A `GOTO` or `46` offset counts from the byte after the instruction.
 
-A string is pushed as `80000000` plus the string's number, counted from 1 across all macros. The compiler stores the text of each `TypeText` call as a string of its own, even when two calls share the text.
+### Numbering
+
+The compiler takes the macros in pedal order, from pedal 1 of profile 1 to pedal 4 of the last profile. Procedures are numbered from 0 in that order. Strings are numbered from 1 in the same order, and the compiler gives each `TypeText` call a string of its own, even when two calls share the text. A string is pushed as `44` with a 4-byte operand, `80000000` plus the string's number. [image-format.md](image-format.md#the-runtime-image-space-3) gives where the strings and procedures sit in the runtime image.
 
 | Builtin | Id |
 | --- | --- |
