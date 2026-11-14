@@ -1,0 +1,21 @@
+owner = "Your Name Here"
+
+[[profile]]
+name = "Generic"
+settings = "6464000000000000000f0f0f0000000000000000000000000000000000"
+
+  [[profile.pedal]]
+  macro = "PushToTalk.idi"
+  label = "PushToTalk"
+
+  [[profile.pedal]]
+  macro = "SpamClick.idi"
+  label = "SpamLeftClick"
+
+  [[profile.pedal]]
+  macro = "PushToTalk.idi"
+  label = "PushToTalk"
+
+  [[profile.pedal]]
+  macro = "SpamClick.idi"
+  label = "SpamLeftClick"

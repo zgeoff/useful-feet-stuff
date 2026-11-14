@@ -1,0 +1,55 @@
+// Button Press/Release macro built from the 1A Button Press-Release Template
+//
+
+
+///////////////////////////
+// This gets called when button is first pressed down
+PROCEDURE ButtonDown
+	
+	
+
+
+RETURN
+END
+
+////////////////////////////////////////////////
+// This gets called every 16ms while the button is held down
+PROCEDURE ButtonDownRepeat
+
+	
+	MButton(1,0,90,0)
+
+
+RETURN
+END
+
+
+////////////////////
+// This gets called when button is released
+PROCEDURE ButtonUp
+
+	
+
+
+RETURN
+END
+
+
+THREAD Profile
+	Start:
+		WaitForButton(Button, ButtonMask)
+		
+		ButtonDown()
+		
+		DO
+			ButtonDownRepeat()
+			DelayForMs(16)	
+		WHILE ((GetButtonState & ButtonMask) == Button)
+		
+		ButtonUp()
+		
+		GOTO Start
+END
+
+
+

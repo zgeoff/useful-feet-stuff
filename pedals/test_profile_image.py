@@ -1,3 +1,6 @@
+import hashlib
+from pathlib import Path
+
 import pytest
 
 from pedals import profile_image
@@ -115,3 +118,30 @@ def test_it_rejects_profile_numbers_with_a_gap():
 
     with pytest.raises(BadImage, match="expected 1 to 2"):
         profile_image.decode(image)
+
+
+def test_it_decodes_the_golden_image_from_the_vendor_app():
+    image = (Path(__file__).parent / "test_fixtures" / "golden" / "space2.bin").read_bytes()
+
+    config = profile_image.decode(image)
+
+    assert (
+        config.owner,
+        config.serial,
+        config.files,
+        [(p.name, p.image, len(p.settings)) for p in config.profiles],
+        [(d.macro, d.label, d.description, hashlib.sha256(d.source).hexdigest()[:16]) for d in config.profiles[0].pedals],
+        config.extra,
+    ) == (
+        "Your Name Here",
+        "F00000000",
+        {},
+        [("Generic", None, 29)],
+        [
+            ("PushToTalk.idi", "PushToTalk", None, "f9f9ede86c63e3c3"),
+            ("SpamClick.idi", "SpamLeftClick", None, "abd06f24584e125d"),
+            ("PushToTalk.idi", "PushToTalk", None, "f9f9ede86c63e3c3"),
+            ("SpamClick.idi", "SpamLeftClick", None, "abd06f24584e125d"),
+        ],
+        [],
+    )

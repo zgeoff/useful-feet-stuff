@@ -126,11 +126,14 @@ def _pull(args, env: Env) -> int:
 def _diff(args, env: Env) -> int:
     repo = config_files.load(env.repo_root)
     device = _read_config(_connect(env))
-    lines = _differences(repo, device) + _unnamed_macros(env.repo_root, repo)
+    lines = _differences(repo, device)
     for line in lines:
         _say(env, line)
     if not lines:
         _say(env, "same       the repo matches the device")
+    # a macro no pedal names is a library file, so it is a note and leaves the exit code alone
+    for line in _unnamed_macros(env.repo_root, repo):
+        _say(env, line)
     return EXIT_DIFF if lines else EXIT_OK
 
 

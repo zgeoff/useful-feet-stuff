@@ -121,14 +121,17 @@ def test_diff_reports_a_changed_label_and_a_changed_source(tmp_path):
     )
 
 
-def test_diff_lists_a_macro_file_no_pedal_names(tmp_path):
+def test_diff_notes_a_macro_file_no_pedal_names_without_failing(tmp_path):
     ctx = setup_test(tmp_path, FakeDevice(spaces={2: two_profile_image()}))
     ctx["run"]("pull")
     (tmp_path / "macros" / "Spare.idi").write_bytes(b"x")
     ctx["out"].truncate(0)
     ctx["out"].seek(0)
 
-    assert ctx["run"]("diff") == (1, "unused     macros/Spare.idi: no pedal names it\n")
+    assert ctx["run"]("diff") == (
+        0,
+        "same       the repo matches the device\nunused     macros/Spare.idi: no pedal names it\n",
+    )
 
 
 def test_diff_without_pedals_toml_fails_as_bad_input(tmp_path):
