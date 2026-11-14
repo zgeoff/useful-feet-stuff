@@ -52,10 +52,10 @@ def test_read_refuses_space(space):
 
 
 def test_read_raises_no_answer_when_the_device_returns_no_data():
-    ctx = setup_test(FakeDevice(spaces={2: b""}))
+    ctx = setup_test(FakeDevice())
 
     with pytest.raises(NoAnswer, match="no data"):
-        ctx["device"].read(space=2, addr=0, length=4)
+        ctx["device"].read(space=2, addr=0x20000, length=4)
 
 
 def test_version_raises_no_answer_from_a_silent_device():

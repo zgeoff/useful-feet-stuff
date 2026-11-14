@@ -3,20 +3,24 @@
 import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
-from pedals import config_files, profile_image
+from pedals import compiler, config_files, flash, profile_image
+from pedals.compiler import CompileError
 from pedals.config_files import ConfigError, PullRefused
-from pedals.device import Device
+from pedals.device import Device, WriteFailed
+from pedals.flash import FlashError
 from pedals.hid import DeviceNotFound, HidChannel, NoAnswer
-from pedals.profile_image import BadImage, Config
+from pedals.profile_image import BadImage, Config, TooLarge
 
 EXIT_OK = 0
 EXIT_DIFF = 1
 EXIT_USAGE = 2
 EXIT_NO_DEVICE = 3
 EXIT_BAD_INPUT = 4
+EXIT_FLASH = 5
 EXIT_REFUSED = 6
 EXIT_BAD_DEVICE_DATA = 7
 
@@ -29,6 +33,9 @@ class Env:
     vendor_app_running: Callable[[], bool]
     repo_root: Path
     out: TextIO
+    backup_root: Path  # where apply and restore save the pair they replace
+    ask: Callable[[str], bool]  # the owner's yes or no
+    now: Callable[[], datetime]
 
 
 class _Exit(Exception):
@@ -53,6 +60,17 @@ def main(argv: list[str], env: Env) -> int:
     except ConfigError as err:
         _say(env, f"config     {err}")
         return EXIT_BAD_INPUT
+    except (CompileError, TooLarge) as err:
+        _say(env, f"compile    {err}")
+        return EXIT_BAD_INPUT
+    except (FlashError, WriteFailed) as err:
+        _say(env, f"flash      {err}")
+        backup_dir = getattr(err, "backup_dir", None)
+        if not getattr(err, "runtime_running", False):
+            _say(env, "flash      the pedals' macros are stopped until a write succeeds")
+        if backup_dir is not None:
+            _say(env, f"flash      to put the old config back, run: pedals restore \"{backup_dir}\"")
+        return EXIT_FLASH
     except (BadImage, PullRefused) as err:
         _say(env, f"device     {err}")
         return EXIT_BAD_DEVICE_DATA
@@ -70,6 +88,13 @@ def _parser() -> argparse.ArgumentParser:
     switch = commands.add_parser("switch", help="change the active profile; no flash write")
     switch.add_argument("profile", help="number or exact name")
     switch.set_defaults(run=_switch)
+    apply = commands.add_parser("apply", help="compile the repo and write it to the pedals")
+    apply.add_argument("--yes", action="store_true", help="write without asking")
+    apply.set_defaults(run=_apply)
+    restore = commands.add_parser("restore", help="write a saved space2.bin + space3.bin pair to the pedals")
+    restore.add_argument("dir", type=Path, help="the folder that holds the pair")
+    restore.add_argument("--yes", action="store_true", help="write without asking")
+    restore.set_defaults(run=_restore)
     return parser
 
 
@@ -143,6 +168,58 @@ def _switch(args, env: Env) -> int:
     n = _resolve(config, args.profile)
     dev.switch_profile(n)
     _say(env, f'profile    {n} "{config.profiles[n - 1].name}"')
+    return EXIT_OK
+
+
+def _apply(args, env: Env) -> int:
+    repo = config_files.load(env.repo_root)
+    dev = _connect(env)
+    old = flash.read_images(dev)
+    device = profile_image.decode(old[0])
+    repo.serial = device.serial  # pedals.toml holds no serial; keep the device's own
+    space2 = profile_image.encode(repo)
+    space3 = compiler.compile(repo)
+    lines = _differences(repo, device)
+    if not lines:
+        _say(env, "same       the repo matches the device; nothing to write")
+        return EXIT_OK
+    for line in lines:
+        _say(env, line)
+    _say(env, f"write      space 2: {len(space2)} bytes, space 3: {len(space3)} bytes")
+    if not args.yes and not env.ask("write this config to the pedals? [y/N] "):
+        _say(env, "stopped    nothing written")
+        return EXIT_OK
+    active = dev.active_profile()
+    folder = flash.save_backup(*old, env.backup_root, env.now())
+    _say(env, f"backup     {folder}")
+    flash.write(dev, space2, space3, old=old, backup_dir=folder,
+                profile_after=active if active <= len(repo.profiles) else 1)
+    if _differences(repo, _read_config(dev)):
+        raise FlashError("the device reads back a config other than the repo's", folder, True)
+    _say(env, f"wrote      {len(repo.profiles)} profiles; the device matches the repo")
+    return EXIT_OK
+
+
+def _restore(args, env: Env) -> int:
+    if not (args.dir / flash.SPACE2_FILE).is_file() or not (args.dir / flash.SPACE3_FILE).is_file():
+        raise _Exit(EXIT_USAGE, f"restore    {args.dir} holds no {flash.SPACE2_FILE} and {flash.SPACE3_FILE}")
+    space2, space3 = flash.load_pair(args.dir)
+    dev = _connect(env)
+    # After a failed write the device images can be unreadable; restore goes on without them.
+    try:
+        old = flash.read_images(dev)
+    except BadImage:
+        old = None
+    _say(env, f"restore    space 2: {len(space2)} bytes, space 3: {len(space3)} bytes, from {args.dir}")
+    if not args.yes and not env.ask("write this pair to the pedals? [y/N] "):
+        _say(env, "stopped    nothing written")
+        return EXIT_OK
+    folder = None
+    if old is not None:
+        folder = flash.save_backup(*old, env.backup_root, env.now())
+        _say(env, f"backup     {folder}")
+    flash.write(dev, space2, space3, old=old or (b"", b""), backup_dir=folder or args.dir, profile_after=1)
+    _say(env, "wrote      the pair; the pedals run profile 1")
     return EXIT_OK
 
 

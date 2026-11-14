@@ -32,10 +32,10 @@ The table lists the commands in the order a config session uses them.
 | `04 01 <profile>` | switch the active profile | `84` |
 | `08` | stop the runtime, the device's macro interpreter | `88` |
 | `05 01 <sector>` | erase 64 KiB sector number `<sector>`; the device logs `kBHEraseFlashSector <sector × 0x10000>` | `85` |
-| `03 <len+6> <len:u16> <addr:u32> <data>` | write `len` bytes, 56 at most, never across a 256-byte boundary | `83` |
+| `03 <len+6> <len:u16> <addr:u32> <data>` | write `len` bytes, 56 at most, never across a 256-byte boundary | `83 01 <status>`; status 0 is ok |
 | `09` | start the runtime | `89` |
 
-The CLI sends only `01`, `0b`, `0d`, `02` and `04`. It never stops the runtime, erases or writes.
+`status`, `show`, `pull`, `diff` and `switch` send only `01`, `0b`, `0d`, `02` and `04`. Only `apply` and `restore` send `08`, `05`, `03` and `09`, as [Writing the flash](#writing-the-flash) says. No command selects space 0 or `0x81`, which hold the firmware.
 
 ## Firmware styles
 
@@ -73,19 +73,22 @@ The vendor app reads the profile image at startup, and the CLI reads it in the s
 
 ## Writing the flash
 
-The vendor app saves a config with this sequence. Each write in steps 5 and 7 is followed by a read of the same bytes, and the vendor app compares the two before the next write.
+`pedals apply` and `pedals restore` write with the vendor app's sequence. They add the blank check in step 5 and the read-back in steps 6 and 8, which the vendor app does in part.
 
 1. Send `08` to stop the runtime. Expect: `88`.
 2. Send `0d 01 02`. Expect: `8d`.
-3. Send `05 01 00`. Expect: `85`.
+3. Send `05 01 00`. Expect: `85`, after about 0.7 s.
 4. Send `05 01 01`. Expect: `85`.
-5. Write the profile image to space 2, from address 0. Expect: `83` for each write.
-6. Send `0d 01 03`. Expect: `8d`.
-7. Write the runtime image to space 3, from address 0. Expect: `83` for each write.
-8. Send `09` to start the runtime. Expect: `89`.
-9. Send `04 01 <profile>` with the profile that was active before step 1. Expect: `84`.
+5. Read space 2 and space 3 over the old and the new image length. Expect: `0xFF` in every byte.
+6. Write the profile image to space 2, from address 0. Expect: `83 01 00` for each write.
+7. Send `0d 01 03`. Expect: `8d`.
+8. Write the runtime image to space 3, from address 0. Expect: `83 01 00` for each write.
+9. Send `09` to start the runtime. Expect: `89`.
+10. Send `04 01 <profile>` with the profile that was active before step 1. Expect: `84`.
 
-The sequence erases nothing after it selects space 3, yet after a save space 3 reads back as erased (`0xFF`) past the new runtime image, where the old, longer image was. Which of the two erases clears space 3 is not known: space 2 reads as erased at `0x10000`, so sector 1 is not simply the start of space 3. Repeat the whole sequence to get the same result.
+Each write is at most 56 bytes and never crosses a 256-byte page, so each page takes 4 writes of 56 bytes and 1 of 32. After each write, the CLI reads the same bytes back. When they differ, it writes the chunk again, up to 3 times. After the third failure, it stops with the runtime stopped, and prints the `pedals restore` command for the backup it took before step 1.
+
+The firmware logs each erase as `kBHEraseFlashSector <sector × 0x10000>`. The sequence erases nothing after it selects space 3, yet after the two erases, space 3 reads as `0xFF`. Which erase clears it is not known: space 2 reads as `0xFF` at `0x10000` too, so sector 1 is not simply the start of space 3. When step 5 finds space 3 not blank, the CLI writes the old profile image back to space 2, starts the runtime beside the old runtime image, and stops.
 
 ## The silent channel after a reboot
 
