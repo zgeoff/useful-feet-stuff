@@ -59,7 +59,7 @@ name = "Racing Sim"                 # tag 0x04
 image = "track.png"                 # tag 0x10: the vendor app's background picture; optional
 settings = "6464000000000000000f0f0f0000000000000000000000000000000000"  # tag 0x03, 29 bytes in hex
 
-  [[profile.pedal]]                 # in pedal order; 1 to 4 pedals
+  [[profile.pedal]]                 # in pedal order, from pedal 1, the rightmost; 1 to 4 pedals
   macro = "Horn.idi"                # tag 0x06; the file in macros/ is tag 0x07
   label = "Horn"                    # tag 0x0b
   description = "Sound the horn"    # tag 0x0c; optional

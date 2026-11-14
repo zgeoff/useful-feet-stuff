@@ -15,12 +15,14 @@ Avoid these mistakes:
 - reporting `no answer` as a bug: the pedals need a replug;
 - running `pull` over edits you have not committed, which it overwrites;
 - running `apply --yes` without the owner's go-ahead;
+- taking pedal 1 for the leftmost pedal: the pedals count from the right;
 - sending your own USB messages to the pedals.
 
 ## Key rules
 
 - [Run the CLI](#run-the-cli): from WSL; on exit 6, ask the owner to close the vendor app.
 - [Fix no answer](#fix-no-answer): ask the owner to replug the pedals.
+- [Fix a pedal that does nothing](#fix-a-pedal-that-does-nothing): test its macro on a working pedal, then test the dead pedal in another socket.
 - [Change a pedal](#change-a-pedal): start from `same`, edit the repo, and `apply` only on the owner's go-ahead.
 - [Write a macro](#write-a-macro): copy a template, with `1` to press a key and `0` to release it.
 
@@ -34,7 +36,7 @@ Run `bin/pedals <command>` from the repo root in WSL. The script runs the CLI un
 | `show [profile]` | list each profile's pedals | reads |
 | `diff` | compare the repo with the pedals | reads |
 | `pull` | overwrite `pedals.toml`, and each macro a pedal runs, with the pedals' copy | reads |
-| `switch <profile>` | change the active profile, by number or exact name | changes the active profile only |
+| `switch <profile>` | change the active profile, by its number from 1 or its exact name | changes the active profile only |
 | `apply` | write the repo's config to the pedals | saves a backup, then erases and rewrites the config |
 | `restore <folder>` | write a backup to the pedals | saves a backup, then erases and rewrites the config |
 
@@ -53,21 +55,42 @@ After some PC reboots, the pedals' USB channel takes messages and never answers.
 
 When `status` still prints `no answer`, stop and tell the owner.
 
+## Fix a pedal that does nothing
+
+When the owner says a pedal does nothing, test its macro on a working pedal, then test the pedal in another socket. A pedal's number is the number of its socket.
+
+1. Run `bin/pedals diff`. Expect: `same`. When it lists a difference, do step 1 of [Change a pedal](#change-a-pedal) first.
+2. Ask the owner which pedal does nothing, and which working pedal they can spare for a test.
+3. When no pedal works, run `bin/pedals status`. If the active profile is not the one the owner uses, run `bin/pedals switch <profile>`. If it is, follow [Fix no answer](#fix-no-answer).
+4. In `pedals.toml`, set the test pedal's `macro` to the dead pedal's macro. Leave the edit uncommitted.
+5. On the owner's go-ahead, run `bin/pedals apply --yes`. Expect: a `backup` line, then `wrote`.
+6. Ask the owner to press the test pedal.
+   - It does nothing: the macro is at fault. Go to step 10.
+   - It works: the hardware is at fault. Go on to step 7.
+7. Ask the owner to plug the dead pedal into the test pedal's socket, and press it. That socket still runs the dead pedal's macro.
+   - It works: the dead pedal's own socket is bad.
+   - It does nothing: the pedal or its cable is bad.
+8. Ask the owner to plug each pedal back into its own socket.
+9. Tell the owner which part is at fault.
+10. Run `git checkout pedals.toml`. On the owner's go-ahead, run `bin/pedals apply --yes`. Expect: a `backup` line, then `wrote`.
+
+When step 6 shows the macro is at fault, fix it as [Write a macro](#write-a-macro) says, after step 10, as its own change.
+
 ## Change a pedal
 
 `apply` erases and rewrites the pedals' config. Get the owner's go-ahead before every `apply` and every `restore`.
 
 1. Run `bin/pedals diff`. Expect: `same`. When it lists a difference, the pedals or the repo changed since the last sync. Show the owner the difference, and ask which side holds the config they want:
-   - the pedals: commit your own edits first, so `pull` cannot overwrite them, then run `bin/pedals pull` and commit the result;
+   - the pedals: commit your own edits first, because `pull` overwrites them. Then run `bin/pedals pull`, and commit the result;
    - the repo: go on to step 2.
-2. Edit [`pedals.toml`](../../../pedals.toml). [docs/cli.md](../../../docs/cli.md#pedalstoml) gives its format: each `[[profile]]` lists its pedals in order, from pedal 1. Set a pedal's `label`, or set its `macro` to a file name in `macros/`, such as `ReopenTab.idi`.
+2. Edit [`pedals.toml`](../../../pedals.toml). [docs/cli.md](../../../docs/cli.md#pedalstoml) gives its format: each `[[profile]]` lists its pedals in order, from pedal 1, the rightmost pedal, to pedal 4, the leftmost. Set a pedal's `label`, or set its `macro` to a file name in `macros/`, such as `ReopenTab.idi`.
 3. For a new macro, write it as [Write a macro](#write-a-macro) says.
 4. Run `bin/pedals diff`, and show the owner its output.
 5. On the owner's go-ahead, run `bin/pedals apply --yes`. Expect: a `backup` line, then `wrote`.
 6. Run `bin/pedals diff`. Expect: `same`.
 7. Commit the change and open a PR. Follow the branch and commit conventions in your instructions for this repo.
 
-When `apply` exits 4, it sent nothing to the pedals. Its output shows a macro file and a line: fix that line, and run `apply` again.
+When `apply` exits 4, it sent nothing to the pedals. Its output gives a macro file and a line number. Fix the macro there, and run `apply` again.
 
 When `apply` exits 5, the write failed, and the pedals may send no keys until a write succeeds. Tell the owner at once, and show them the output. On their go-ahead, run the `bin/pedals restore` command the output ends with. When `restore` fails too, stop, and show the owner both outputs. For where each backup goes, see [docs/cli.md](../../../docs/cli.md#what-apply-and-restore-do).
 
